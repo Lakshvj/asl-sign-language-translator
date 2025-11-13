@@ -1,60 +1,44 @@
 import streamlit as st
-import mediapipe as mp
+from cvzone.HandTrackingModule import HandDetector
 import cv2
 import numpy as np
 import json
-from tensorflow.keras.models import load_model
 
-# Load model and labels
-model = load_model("asl_model.h5")
+# Load your trained model
+import tensorflow as tf
+model = tf.keras.models.load_model("asl_model.h5")
+
+# Load label mapping
 with open("label_names.json", "r") as f:
     label_names = json.load(f)
 
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=False,
-                       max_num_hands=1,
-                       min_detection_confidence=0.5)
+detector = HandDetector(maxHands=1)
 
-# Extract 21 landmarks (63 values)
-def extract_landmarks(frame):
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    result = hands.process(frame_rgb)
-    
-    if not result.multi_hand_landmarks:
-        return None
-    
-    hand = result.multi_hand_landmarks[0]
-    landmarks = []
-    for lm in hand.landmark:
-        landmarks.extend([lm.x, lm.y, lm.z])
-    
-    return np.array(landmarks).reshape(1, -1)
-
-# Streamlit UI
-st.title("✋ AI-Based Sign Language Translator")
-st.write("Show a sign in front of your camera to get prediction.")
+st.title("ASL Sign Language Translator")
 
 run = st.checkbox("Start Camera")
+FRAME_WINDOW = st.image([])
 
-camera = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(0)
 
 while run:
-    ret, frame = camera.read()
-    if not ret:
-        st.error("Camera not detected")
-        break
+    ret, frame = cap.read()
+    hands, img = detector.findHands(frame)
 
-    landmarks = extract_landmarks(frame)
-    
-    if landmarks is not None:
-        pred = model.predict(landmarks)[0]
+    if hands:
+        hand = hands[0]
+        lmList = hand["lmList"]  # 21 hand landmarks
+
+        # Flatten to 63 inputs for your model
+        data = np.array(lmList).flatten().reshape(1, 63)
+
+        pred = model.predict(data)[0]
         idx = np.argmax(pred)
-        sign = label_names[idx]
         confidence = pred[idx]
 
-        cv2.putText(frame, f"{sign} ({confidence:.2f})", (10, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        prediction = f"{label_names[idx]} ({confidence:.2f})"
+        cv2.putText(img, prediction, (10,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
 
-    st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    
-camera.release()
+    FRAME_WINDOW.image(img, channels="BGR")
+
+cap.release()
